@@ -19,6 +19,7 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
     origin: '*',
     methods: ['GET', 'POST'],
   },
+  transports: ['websocket', 'polling'],
 });
 
 app.use(cors());
@@ -203,7 +204,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
   });
 });
 
-// Resolve client dist path reliably
+// Resolve client dist path reliably across local and production cloud paths
 const possibleClientPaths = [
   path.resolve(process.cwd(), 'dist/client'),
   path.resolve(__dirname, '../../client'),
@@ -211,6 +212,7 @@ const possibleClientPaths = [
 ];
 const clientDistPath = possibleClientPaths.find((p) => fs.existsSync(p)) || path.resolve(process.cwd(), 'dist/client');
 
+console.log(`[PulseQ] Serving static assets from: ${clientDistPath}`);
 app.use(express.static(clientDistPath));
 
 app.get('*', (_req, res) => {
@@ -218,11 +220,14 @@ app.get('*', (_req, res) => {
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(200).send('PulseQ Backend API is running. Client assets building.');
+    res.status(200).send('PulseQ Backend API is running. Client assets are building.');
   }
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 PulseQ Server is running on http://localhost:${PORT}`);
+// Bind to 0.0.0.0 so Render and cloud hosts can route incoming public traffic
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 PulseQ Server is running on http://${HOST}:${PORT}`);
 });
