@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { socket } from './utils/socket.js';
-import { getOrCreateSessionId } from './utils/session.js';
+import {
+  getOrCreateSessionId,
+  saveActiveSession,
+  getSavedActiveSession,
+  clearActiveSession
+} from './utils/session.js';
 import { Room, Question, SessionExportData } from '../shared/types.js';
 import { LandingJoin } from './components/LandingJoin.js';
 import { StudentView } from './components/student/StudentView.js';
 import { HostHUD } from './components/host/HostHUD.js';
 import { ExportModal } from './components/common/ExportModal.js';
+import { Loader2 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [sessionId] = useState<string>(() => getOrCreateSessionId());
@@ -14,6 +20,49 @@ export const App: React.FC = () => {
   const [isHost, setIsHost] = useState(false);
   const [endedExportData, setEndedExportData] = useState<SessionExportData | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  // Auto-reconnect to previous session on page refresh
+  useEffect(() => {
+    const saved = getSavedActiveSession();
+    if (!saved) {
+      setIsRestoringSession(false);
+      return;
+    }
+
+    const tryReconnect = () => {
+      socket.emit(
+        'join-room',
+        {
+          roomCode: saved.roomCode,
+          sessionId,
+          role: saved.role,
+        },
+        (res) => {
+          setIsRestoringSession(false);
+          if (res.success && res.room && res.questions) {
+            setCurrentRoom(res.room);
+            setQuestions(res.questions);
+            setIsHost(res.isHost ?? (saved.role === 'host'));
+          } else {
+            // Room expired or deleted on server restart
+            clearActiveSession();
+          }
+        }
+      );
+    };
+
+    if (socket.connected) {
+      tryReconnect();
+    } else {
+      socket.once('connect', tryReconnect);
+      // Timeout fallback if socket takes too long
+      const timeout = setTimeout(() => {
+        setIsRestoringSession(false);
+      }, 3000);
+      return () => clearTimeout(timeout);
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     // Socket real-time listeners
@@ -50,6 +99,7 @@ export const App: React.FC = () => {
       setCurrentRoom((prev) => (prev ? { ...prev, status: 'ended' } : null));
       setEndedExportData(exportData);
       setIsExportModalOpen(true);
+      clearActiveSession();
     };
 
     socket.on('room-updated', handleRoomUpdated);
@@ -76,9 +126,11 @@ export const App: React.FC = () => {
     setQuestions(data.questions);
     setIsHost(data.isHost);
     setEndedExportData(null);
+    saveActiveSession(data.room.code, data.isHost ? 'host' : 'student');
   };
 
   const handleLeaveRoom = () => {
+    clearActiveSession();
     setCurrentRoom(null);
     setQuestions([]);
     setIsHost(false);
@@ -91,6 +143,16 @@ export const App: React.FC = () => {
     setIsExportModalOpen(false);
     handleLeaveRoom();
   };
+
+  // Restoring state loader
+  if (isRestoringSession) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+        <span className="text-sm font-medium">Connecting to PulseQ...</span>
+      </div>
+    );
+  }
 
   // If not connected to a room, show Landing & Join view
   if (!currentRoom) {
