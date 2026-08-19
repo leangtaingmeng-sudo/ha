@@ -189,24 +189,15 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            {onReopenRoom && (
-              <button
-                onClick={() => onReopenRoom(room.code)}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold rounded-xl border border-amber-500/30 transition active:scale-95"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reopen Session</span>
-              </button>
-            )}
+          {onReopenRoom && (
             <button
-              onClick={onBackToMain}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition"
+              onClick={() => onReopenRoom(room.code)}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold rounded-xl border border-amber-500/30 transition active:scale-95 flex-shrink-0"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Main Screen</span>
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reopen Session</span>
             </button>
-          </div>
+          )}
         </div>
 
         {/* Metric Summary Cards */}
