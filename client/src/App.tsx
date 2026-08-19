@@ -12,6 +12,7 @@ import { LandingJoin } from './components/LandingJoin.js';
 import { StudentView } from './components/student/StudentView.js';
 import { HostHUD } from './components/host/HostHUD.js';
 import { ExportModal } from './components/common/ExportModal.js';
+import { ArchiveViewer } from './components/archive/ArchiveViewer.js';
 import { Loader2 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -22,6 +23,8 @@ export const App: React.FC = () => {
   const [endedExportData, setEndedExportData] = useState<SessionExportData | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
+  const [archiveData, setArchiveData] = useState<SessionExportData | null>(null);
+  const [archiveUserRole, setArchiveUserRole] = useState<'host' | 'student' | undefined>(undefined);
 
   // Auto-reconnect to previous session on page refresh (checking URL query + localStorage)
   useEffect(() => {
@@ -169,6 +172,7 @@ export const App: React.FC = () => {
   }, []);
 
   const handleJoined = (data: { room: Room; questions: Question[]; isHost: boolean }) => {
+    setArchiveData(null);
     setCurrentRoom(data.room);
     setQuestions(data.questions);
     setIsHost(data.isHost);
@@ -185,6 +189,7 @@ export const App: React.FC = () => {
   const handleLeaveRoom = () => {
     clearActiveSession();
     setCurrentRoom(null);
+    setArchiveData(null);
     setQuestions([]);
     setIsHost(false);
     setEndedExportData(null);
@@ -194,6 +199,18 @@ export const App: React.FC = () => {
   const handleReturnToMainScreen = () => {
     setIsExportModalOpen(false);
     handleLeaveRoom();
+  };
+
+  const handleReopenFromArchive = (code: string) => {
+    socket.emit('reopen-room', { roomCode: code, sessionId }, (res) => {
+      if (res && res.success && res.room) {
+        handleJoined({
+          room: res.room,
+          questions: res.questions || [],
+          isHost: true,
+        });
+      }
+    });
   };
 
   // Restoring state loader
@@ -206,9 +223,30 @@ export const App: React.FC = () => {
     );
   }
 
+  // Read-Only Archive Viewer Mode
+  if (archiveData) {
+    return (
+      <ArchiveViewer
+        exportData={archiveData}
+        userRole={archiveUserRole}
+        onBackToMain={handleLeaveRoom}
+        onReopenRoom={archiveUserRole === 'host' ? handleReopenFromArchive : undefined}
+      />
+    );
+  }
+
   // If not connected to a room, show Landing & Join view
   if (!currentRoom) {
-    return <LandingJoin sessionId={sessionId} onJoined={handleJoined} />;
+    return (
+      <LandingJoin
+        sessionId={sessionId}
+        onJoined={handleJoined}
+        onViewArchive={(data, role) => {
+          setArchiveData(data);
+          setArchiveUserRole(role);
+        }}
+      />
+    );
   }
 
   // Instructor HUD View

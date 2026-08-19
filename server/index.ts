@@ -372,6 +372,42 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     cb({ success: true, exportData });
   });
 
+  // 9. Get Room Archive (Read-Only Summary for History Viewer)
+  socket.on('get-room-archive', ({ roomCode }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
+    const code = (roomCode || '').toUpperCase().trim();
+    const exportData = memoryStore.getExportData(code);
+
+    if (!exportData) {
+      return cb({ success: false, error: 'Room archive not found' });
+    }
+
+    cb({ success: true, exportData });
+  });
+
+  // 10. Reopen / Resume Ended Room (Instructor)
+  socket.on('reopen-room', ({ roomCode, sessionId }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
+    const code = (roomCode || '').toUpperCase().trim();
+    const reopened = memoryStore.reopenRoom(code, sessionId);
+
+    if (!reopened) {
+      return cb({ success: false, error: 'Failed to reopen room' });
+    }
+
+    const joined = memoryStore.joinSocket(socket.id, code, sessionId, 'host');
+    socket.join(code);
+    io.to(code).emit('room-updated', reopened.room);
+    io.to(code).emit('participant-count', joined?.room.participantCount || 1);
+
+    cb({
+      success: true,
+      room: reopened.room,
+      questions: reopened.questions,
+      isHost: true,
+    });
+  });
+
   // Disconnect
   socket.on('disconnect', () => {
     const left = memoryStore.leaveSocket(socket.id);

@@ -131,6 +131,24 @@ export class MemoryStore {
     return room;
   }
 
+  reopenRoom(code: string, hostSessionId?: string): { room: Room; questions: Question[] } | null {
+    const upperCode = code.toUpperCase();
+    let room = this.rooms.get(upperCode);
+    if (!room) {
+      room = this.restoreRoom(upperCode, 'Classroom Session', hostSessionId);
+    }
+
+    room.status = 'active';
+    room.endedAt = undefined;
+    if (hostSessionId) {
+      room.hostSessionId = hostSessionId;
+    }
+
+    this.scheduleSave();
+    const questions = this.getQuestions(upperCode);
+    return { room, questions };
+  }
+
   getRoom(code: string): Room | undefined {
     return this.rooms.get(code.toUpperCase());
   }

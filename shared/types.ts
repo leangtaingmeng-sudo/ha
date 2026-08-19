@@ -98,6 +98,22 @@ export interface ClientToServerEvents {
     payload: { roomCode: string },
     callback: (res: { success: boolean; exportData?: SessionExportData; error?: string }) => void
   ) => void;
+
+  'get-room-archive': (
+    payload: { roomCode: string },
+    callback: (res: { success: boolean; exportData?: SessionExportData; error?: string }) => void
+  ) => void;
+
+  'reopen-room': (
+    payload: { roomCode: string; sessionId: string },
+    callback: (res: {
+      success: boolean;
+      room?: Room;
+      questions?: Question[];
+      isHost?: boolean;
+      error?: string;
+    }) => void
+  ) => void;
 }
 
 // Server to Client Events
