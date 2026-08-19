@@ -24,8 +24,7 @@ import {
   VolumeX,
   Pin,
   PinOff,
-  Flame,
-  Loader2
+  Flame
 } from 'lucide-react';
 
 interface HostHUDProps {
@@ -47,14 +46,14 @@ export const HostHUD: React.FC<HostHUDProps> = ({
   const [selectedSlide, setSelectedSlide] = useState<string>('all');
   const [copiedCode, setCopiedCode] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
-  const [isMuted, setIsMuted] = useState(() => soundManager.isMutedState());
+  const [isMuted, setIsMuted] = useState(() => soundManager.getIsMuted());
 
-  // Extract unique slide tags for filtering
+  // Extract unique slide tags for filter chips
   const uniqueSlideTags = useMemo(() => {
     const set = new Set<string>();
-    for (const q of questions) {
+    questions.forEach((q) => {
       if (q.slideTag) set.add(q.slideTag);
-    }
+    });
     return Array.from(set).sort();
   }, [questions]);
 
@@ -109,55 +108,46 @@ export const HostHUD: React.FC<HostHUDProps> = ({
     }
   };
 
-  // Bulletproof End & Export Flow: Guarantees export modal always opens even on network blip
   const handleEndSession = () => {
-    if (window.confirm('Are you sure you want to end this class session? The room will be locked for new questions.')) {
+    if (window.confirm('Are you sure you want to end this class session? The room will be locked for submissions and exported.')) {
       setIsEnding(true);
 
-      const triggerExport = (data?: SessionExportData) => {
-        setIsEnding(false);
-        triggerConfetti();
+      // Construct robust export data
+      const resolvedList = questions.filter((q) => q.status === 'resolved');
+      const answeringList = questions.filter((q) => q.status === 'answering');
+      const pendingList = questions.filter((q) => q.status !== 'resolved');
+      const totalUpvotes = questions.reduce((acc, q) => acc + q.upvotes, 0);
 
-        if (data) {
-          onEndSession(data);
-          return;
-        }
-
-        // Reliable local calculation fallback
-        const resolvedCount = questions.filter((q) => q.status === 'resolved').length;
-        const answeringCount = questions.filter((q) => q.status === 'answering').length;
-        const pendingCount = questions.filter((q) => q.status === 'pending').length;
-        const totalUpvotes = questions.reduce((acc, q) => acc + q.upvotes, 0);
-        const durationMinutes = Math.max(1, Math.round((Date.now() - room.createdAt) / 60000));
-
-        const fallbackExportData: SessionExportData = {
-          room: { ...room, status: 'ended', endedAt: Date.now() },
-          questions,
-          stats: {
-            totalQuestions: questions.length,
-            totalUpvotes,
-            resolvedCount,
-            answeringCount,
-            pendingCount,
-            durationMinutes,
-          },
-        };
-        onEndSession(fallbackExportData);
+      const localExportData: SessionExportData = {
+        room: { ...room, status: 'ended', endedAt: Date.now() },
+        questions,
+        stats: {
+          totalQuestions: questions.length,
+          totalUpvotes,
+          resolvedCount: resolvedList.length,
+          answeringCount: answeringList.length,
+          pendingCount: pendingList.length,
+          durationMinutes: Math.max(1, Math.round((Date.now() - room.createdAt) / 60000)),
+        },
       };
 
-      // 2.5s fallback safety timer in case WebSocket callback is delayed
-      const fallbackTimer = setTimeout(() => {
-        triggerExport();
-      }, 2500);
+      triggerConfetti();
 
+      // Emit to server to lock the room and notify students
       socket.emit('end-session', { roomCode: room.code }, (res) => {
-        clearTimeout(fallbackTimer);
+        setIsEnding(false);
         if (res && res.success && res.exportData) {
-          triggerExport(res.exportData);
+          onEndSession(res.exportData);
         } else {
-          triggerExport();
+          onEndSession(localExportData);
         }
       });
+
+      // Safety fallback: ensure export modal always opens even if server acknowledgment is delayed
+      setTimeout(() => {
+        setIsEnding(false);
+        onEndSession(localExportData);
+      }, 500);
     }
   };
 
@@ -186,13 +176,14 @@ export const HostHUD: React.FC<HostHUDProps> = ({
     return matchesSearch && matchesSlide;
   });
 
-  const totalUpvotes = questions.reduce((sum, q) => sum + q.upvotes, 0);
+  const totalUpvotes = questions.reduce((acc, q) => acc + q.upvotes, 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-16">
-      {/* Top Header / Instructor HUD Bar */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 sm:px-8">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* Top Instructor Header */}
+      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 sm:px-8 py-3.5 shadow-md">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          {/* Room Topic & Code */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center font-black">
               HUD
@@ -244,16 +235,11 @@ export const HostHUD: React.FC<HostHUDProps> = ({
 
             <button
               onClick={handleEndSession}
-              disabled={isEnding}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 hover:text-white text-xs font-bold rounded-xl transition active:scale-95 shadow-sm"
-              title="End session and export summary"
+              disabled={isEnding || room.status === 'ended'}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-300 hover:text-rose-200 text-xs font-semibold rounded-xl transition active:scale-95"
             >
-              {isEnding ? (
-                <Loader2 className="w-4 h-4 animate-spin text-rose-300" />
-              ) : (
-                <Power className="w-4 h-4 text-rose-400" />
-              )}
-              <span>{isEnding ? 'Ending...' : 'End & Export'}</span>
+              <Power className="w-4 h-4 text-rose-400" />
+              <span>End & Export</span>
             </button>
           </div>
         </div>
@@ -413,21 +399,21 @@ export const HostHUD: React.FC<HostHUDProps> = ({
                   onClick={() => setSelectedSlide(slide)}
                   className={`px-3 py-1 rounded-lg font-medium transition flex-shrink-0 ${
                     selectedSlide === slide
-                      ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                      ? 'bg-indigo-600 text-white'
                       : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
                   }`}
                 >
-                  🏷️ {slide}
+                  {slide}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Dynamic Questions List */}
+        {/* Priority Question List */}
         <div className="space-y-3">
           {filteredQuestions.length === 0 ? (
-            <div className="text-center py-16 px-4 bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl">
+            <div className="text-center py-16 px-4 bg-slate-900/40 border border-dashed border-slate-800/80 rounded-2xl">
               <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-3">
                 <Sparkles className="w-6 h-6" />
               </div>
@@ -436,98 +422,98 @@ export const HostHUD: React.FC<HostHUDProps> = ({
               </h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
                 {activeTab === 'queue'
-                  ? 'All student doubts have been answered or no questions have been submitted yet.'
-                  : 'Questions you mark as resolved will be archived here for easy reference.'}
+                  ? 'No pending questions from students. Have them scan the QR code to post doubts.'
+                  : 'Questions you mark as resolved will appear here for post-lecture review.'}
               </p>
             </div>
           ) : (
             filteredQuestions.map((q, index) => {
-              const isHighDemand = q.upvotes >= 3;
               const isAnswering = q.status === 'answering';
               const isResolved = q.status === 'resolved';
+              const isHighDemand = q.upvotes >= 3;
 
               return (
                 <div
                   key={q.id}
-                  className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                  className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                     isAnswering
-                      ? 'bg-slate-900 border-sky-400 shadow-xl glow-active'
+                      ? 'bg-slate-900/90 border-sky-400/80 shadow-lg glow-active'
                       : q.isPinned
-                      ? 'bg-indigo-950/40 border-indigo-500 shadow-md'
+                      ? 'bg-indigo-950/30 border-indigo-500/50 shadow-md'
                       : isResolved
-                      ? 'bg-slate-900/50 border-slate-800/80 text-slate-300'
-                      : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                      ? 'bg-slate-900/40 border-slate-800/60 opacity-80'
+                      : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  {/* Left: Rank, Question details & Slide tag */}
-                  <div className="flex items-start gap-3 sm:gap-4 flex-1">
+                  {/* Left: Rank, Votes, and Question Text */}
+                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                    {/* Rank Badge for Queue */}
                     {activeTab === 'queue' && (
-                      <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 flex-shrink-0 mt-0.5">
-                        #{index + 1}
+                      <div className="flex flex-col items-center justify-center min-w-[42px] h-[42px] rounded-xl bg-slate-950 border border-slate-800 flex-shrink-0">
+                        <span className="text-[10px] text-slate-400 font-medium uppercase">
+                          {q.isPinned ? 'PIN' : 'Rank'}
+                        </span>
+                        <span className="text-sm font-extrabold text-indigo-400">
+                          {q.isPinned ? '📌' : `#${index + 1}`}
+                        </span>
                       </div>
                     )}
 
-                    <div className="space-y-1.5 flex-1">
+                    {/* Upvote Pill */}
+                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold font-mono text-sm flex-shrink-0 ${
+                      isHighDemand
+                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400 shadow-sm'
+                        : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400'
+                    }`}>
+                      <ThumbsUp className="w-4 h-4" />
+                      <span>{q.upvotes}</span>
+                    </div>
+
+                    <div className="space-y-1 min-w-0 flex-1">
+                      {/* Meta Tags */}
                       <div className="flex items-center gap-2 flex-wrap text-xs">
                         {q.isPinned && (
-                          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/40">
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/40 flex items-center gap-1">
                             <Pin className="w-3 h-3" /> Pinned
                           </span>
                         )}
-                        {isAnswering && (
-                          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-bold border border-sky-400/40 animate-pulse-subtle">
-                            <Radio className="w-3 h-3" /> Speaking Now
-                          </span>
-                        )}
-                        {isHighDemand && !isResolved && (
-                          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
-                            <Flame className="w-3 h-3 text-amber-400" /> High Demand ({q.upvotes} votes)
-                          </span>
-                        )}
-                        {isResolved && (
-                          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" /> Resolved
+                        {isHighDemand && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 flex items-center gap-1">
+                            <Flame className="w-3 h-3 text-amber-400" /> High Demand
                           </span>
                         )}
                         {q.slideTag && (
-                          <span className="px-2.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-semibold border border-slate-700">
+                          <span className="px-2 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-semibold border border-slate-700">
                             🏷️ {q.slideTag}
+                          </span>
+                        )}
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(q.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {isAnswering && (
+                          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-bold border border-sky-400/40 animate-pulse-subtle">
+                            Speaking Now
                           </span>
                         )}
                       </div>
 
-                      <p className={`text-base leading-relaxed ${isResolved ? 'text-slate-300' : 'text-slate-100 font-semibold'}`}>
+                      {/* Question Text */}
+                      <p className={`text-sm sm:text-base font-semibold ${isResolved ? 'text-slate-300' : 'text-slate-100'}`}>
                         {q.text}
                       </p>
-
-                      <div className="flex items-center gap-3 text-xs text-slate-400 pt-0.5">
-                        <span className="flex items-center gap-1">
-                          <ThumbsUp className="w-3.5 h-3.5 text-indigo-400" /> <strong className="text-slate-200">{q.upvotes}</strong> upvotes
-                        </span>
-                        <span>&bull;</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5" /> {new Date(q.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        {q.resolvedAt && (
-                          <>
-                            <span>&bull;</span>
-                            <span className="text-emerald-400/80">
-                              Resolved at {new Date(q.resolvedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </>
-                        )}
-                      </div>
                     </div>
                   </div>
 
-                  {/* Right: Instructor Action Buttons */}
-                  <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
+                  {/* Right: Actions */}
+                  <div className="flex items-center gap-2 self-end md:self-center flex-shrink-0">
+                    {/* Pin button */}
                     <button
                       onClick={() => handleTogglePin(q.id)}
                       className={`p-2 rounded-xl border transition ${
                         q.isPinned
-                          ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border-slate-700'
+                          ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                          : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-800 border-transparent hover:border-slate-700'
                       }`}
                       title={q.isPinned ? 'Unpin doubt' : 'Pin to top of queue'}
                       aria-label="Pin question"
@@ -538,19 +524,19 @@ export const HostHUD: React.FC<HostHUDProps> = ({
                     {q.status === 'pending' && (
                       <button
                         onClick={() => handleUpdateStatus(q.id, 'answering')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 hover:text-sky-200 text-xs font-bold rounded-xl transition border border-sky-500/30 active:scale-95"
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-indigo-600/20 active:scale-95"
                       >
                         <Radio className="w-3.5 h-3.5" />
-                        <span>Answer Now</span>
+                        <span>Start Answering</span>
                       </button>
                     )}
 
                     {q.status !== 'resolved' ? (
                       <button
                         onClick={() => handleUpdateStatus(q.id, 'resolved')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-emerald-600/20 active:scale-95"
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold rounded-xl transition active:scale-95"
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Resolve</span>
                       </button>
                     ) : (
@@ -590,4 +576,3 @@ export const HostHUD: React.FC<HostHUDProps> = ({
     </div>
   );
 };
-export default HostHUD;

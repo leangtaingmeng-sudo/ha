@@ -14,70 +14,48 @@ export interface RecentRoom {
 }
 
 export function getOrCreateSessionId(): string {
-  try {
-    let sessionId = localStorage.getItem(SESSION_KEY);
-    if (!sessionId) {
-      if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
-        sessionId = 'anon_' + window.crypto.randomUUID().replace(/-/g, '');
-      } else {
-        sessionId = 'anon_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
-      }
-      localStorage.setItem(SESSION_KEY, sessionId);
-    }
-    return sessionId;
-  } catch {
-    return 'anon_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+  let sessionId = localStorage.getItem(SESSION_KEY);
+  if (!sessionId) {
+    sessionId = 'anon_' + crypto.randomUUID().replace(/-/g, '');
+    localStorage.setItem(SESSION_KEY, sessionId);
   }
+  return sessionId;
 }
 
 export function getUserNickname(): string {
-  try {
-    return localStorage.getItem(NICKNAME_KEY) || '';
-  } catch {
-    return '';
-  }
+  return localStorage.getItem(NICKNAME_KEY) || '';
 }
 
 export function setUserNickname(name: string) {
-  try {
-    if (name.trim()) {
-      localStorage.setItem(NICKNAME_KEY, name.trim().slice(0, 30));
-    } else {
-      localStorage.removeItem(NICKNAME_KEY);
-    }
-  } catch {}
-}
-
-export function saveActiveSession(roomCode: string, role: 'host' | 'student', topic?: string) {
-  try {
-    localStorage.setItem(ACTIVE_ROOM_KEY, roomCode.toUpperCase());
-    localStorage.setItem(ACTIVE_ROLE_KEY, role);
-    if (topic) {
-      localStorage.setItem(ACTIVE_TOPIC_KEY, topic);
-    }
-  } catch {}
-}
-
-export function getSavedActiveSession(): { roomCode: string; role: 'host' | 'student'; topic?: string } | null {
-  try {
-    const roomCode = localStorage.getItem(ACTIVE_ROOM_KEY);
-    const role = localStorage.getItem(ACTIVE_ROLE_KEY) as 'host' | 'student' | null;
-    const topic = localStorage.getItem(ACTIVE_TOPIC_KEY) || undefined;
-    if (roomCode && role) {
-      return { roomCode, role, topic };
-    }
-    return null;
-  } catch {
-    return null;
+  if (name.trim()) {
+    localStorage.setItem(NICKNAME_KEY, name.trim().slice(0, 30));
+  } else {
+    localStorage.removeItem(NICKNAME_KEY);
   }
 }
 
+export function saveActiveSession(roomCode: string, role: 'host' | 'student', topic?: string) {
+  localStorage.setItem(ACTIVE_ROOM_KEY, roomCode.toUpperCase());
+  localStorage.setItem(ACTIVE_ROLE_KEY, role);
+  if (topic) {
+    localStorage.setItem(ACTIVE_TOPIC_KEY, topic);
+  }
+}
+
+export function getSavedActiveSession(): { roomCode: string; role: 'host' | 'student'; topic?: string } | null {
+  const roomCode = localStorage.getItem(ACTIVE_ROOM_KEY);
+  const role = localStorage.getItem(ACTIVE_ROLE_KEY) as 'host' | 'student' | null;
+  const topic = localStorage.getItem(ACTIVE_TOPIC_KEY) || undefined;
+  if (roomCode && role) {
+    return { roomCode, role, topic };
+  }
+  return null;
+}
+
 export function clearActiveSession() {
-  try {
-    localStorage.removeItem(ACTIVE_ROOM_KEY);
-    localStorage.removeItem(ACTIVE_ROLE_KEY);
-    localStorage.removeItem(ACTIVE_TOPIC_KEY);
-  } catch {}
+  localStorage.removeItem(ACTIVE_ROOM_KEY);
+  localStorage.removeItem(ACTIVE_ROLE_KEY);
+  localStorage.removeItem(ACTIVE_TOPIC_KEY);
 }
 
 export function getRecentRooms(): RecentRoom[] {
