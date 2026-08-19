@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SessionExportData } from '../../../shared/types.js';
-import { X, Download, FileText, Check, Copy, Sparkles, CheckCircle2, MessageSquare, ThumbsUp, Home, ArrowLeft } from 'lucide-react';
+import { generateClientCSV, generateClientMarkdown, downloadBlobFile } from '../../utils/export.js';
+import { X, Download, FileText, Check, Copy, Sparkles, CheckCircle2, MessageSquare, ThumbsUp, Home } from 'lucide-react';
 
 interface ExportModalProps {
   exportData: SessionExportData;
@@ -20,19 +21,32 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   if (!isOpen) return null;
 
   const { room, stats, questions } = exportData;
+  const safeTopic = (room.topic || 'Classroom').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
 
+  // 100% Client-Side Instant Blob Download (No window navigation, no network dependency)
   const handleDownloadCSV = () => {
-    window.location.href = `/api/rooms/${room.code}/export/csv`;
+    try {
+      const csvContent = generateClientCSV(exportData);
+      downloadBlobFile(csvContent, `${safeTopic}_${room.code}_QnA.csv`, 'text/csv');
+    } catch (err) {
+      console.error('Failed to download CSV:', err);
+    }
   };
 
+  // 100% Client-Side Instant Blob Download
   const handleDownloadMD = () => {
-    window.location.href = `/api/rooms/${room.code}/export/md`;
+    try {
+      const mdContent = generateClientMarkdown(exportData);
+      downloadBlobFile(mdContent, `${safeTopic}_${room.code}_Summary.md`, 'text/markdown');
+    } catch (err) {
+      console.error('Failed to download Markdown:', err);
+    }
   };
 
+  // 100% Client-Side Instant Clipboard Copy
   const handleCopyMarkdown = async () => {
     try {
-      const res = await fetch(`/api/rooms/${room.code}/export/md`);
-      const mdText = await res.text();
+      const mdText = generateClientMarkdown(exportData);
       await navigator.clipboard.writeText(mdText);
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 2500);
@@ -105,7 +119,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         <div className="space-y-3 mb-6">
           <button
             onClick={handleDownloadCSV}
-            className="w-full flex items-center justify-between p-4 bg-slate-950 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700 rounded-2xl transition group text-left"
+            className="w-full flex items-center justify-between p-4 bg-slate-950 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700 rounded-2xl transition group text-left active:scale-[0.99]"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center group-hover:scale-105 transition">
@@ -121,7 +135,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
           <button
             onClick={handleDownloadMD}
-            className="w-full flex items-center justify-between p-4 bg-slate-950 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700 rounded-2xl transition group text-left"
+            className="w-full flex items-center justify-between p-4 bg-slate-950 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700 rounded-2xl transition group text-left active:scale-[0.99]"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center group-hover:scale-105 transition">
@@ -171,3 +185,4 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     </div>
   );
 };
+export default ExportModal;
