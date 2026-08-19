@@ -14,6 +14,37 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 
+// Defensive Rate Limiting (In-Memory sliding window)
+interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+const rateLimits = new Map<string, RateLimitBucket>();
+
+function checkRateLimit(key: string, maxAllowed: number, windowMs: number = 60000): boolean {
+  const now = Date.now();
+  const bucket = rateLimits.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    rateLimits.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= maxAllowed) {
+    return false;
+  }
+  bucket.count++;
+  return true;
+}
+
+// Clean up stale rate limit buckets periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateLimits.entries()) {
+    if (now > v.resetAt) {
+      rateLimits.delete(k);
+    }
+  }
+}, 120000);
+
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
   cors: {
     origin: '*',
@@ -22,8 +53,17 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
   transports: ['websocket', 'polling'],
 });
 
+// Security Headers Middleware
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100kb' })); // Mitigate large body DoS payload attacks
 
 // REST API Endpoints
 app.get('/api/health', (_req, res) => {
@@ -32,7 +72,10 @@ app.get('/api/health', (_req, res) => {
 
 // Check room existence and status
 app.get('/api/rooms/:code', (req, res) => {
-  const code = req.params.code.toUpperCase();
+  const code = (req.params.code || '').toUpperCase().trim();
+  if (!/^[A-Z0-9]{4,10}$/.test(code)) {
+    return res.status(400).json({ error: 'Invalid room code format' });
+  }
   const room = memoryStore.getRoom(code);
   if (!room) {
     return res.status(404).json({ error: 'Room not found' });
@@ -42,7 +85,11 @@ app.get('/api/rooms/:code', (req, res) => {
 
 // Download CSV Export
 app.get('/api/rooms/:code/export/csv', (req, res) => {
-  const code = req.params.code.toUpperCase();
+  const code = (req.params.code || '').toUpperCase().trim();
+  if (!/^[A-Z0-9]{4,10}$/.test(code)) {
+    return res.status(400).json({ error: 'Invalid room code' });
+  }
+
   const room = memoryStore.getRoom(code);
   if (!room) {
     return res.status(404).json({ error: 'Room not found' });
@@ -52,14 +99,18 @@ app.get('/api/rooms/:code/export/csv', (req, res) => {
   const safeTopic = room.topic.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
   const filename = `${safeTopic}_${code}_QnA.csv`;
 
-  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   return res.send(csv);
 });
 
 // Download Markdown Export
 app.get('/api/rooms/:code/export/md', (req, res) => {
-  const code = req.params.code.toUpperCase();
+  const code = (req.params.code || '').toUpperCase().trim();
+  if (!/^[A-Z0-9]{4,10}$/.test(code)) {
+    return res.status(400).json({ error: 'Invalid room code' });
+  }
+
   const room = memoryStore.getRoom(code);
   if (!room) {
     return res.status(404).json({ error: 'Room not found' });
@@ -69,7 +120,7 @@ app.get('/api/rooms/:code/export/md', (req, res) => {
   const safeTopic = room.topic.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
   const filename = `${safeTopic}_${code}_Summary.md`;
 
-  res.setHeader('Content-Type', 'text/markdown');
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   return res.send(md);
 });
@@ -78,8 +129,13 @@ app.get('/api/rooms/:code/export/md', (req, res) => {
 io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
   // 1. Create Room (Instructor)
   socket.on('create-room', ({ topic }, callback) => {
+    if (!checkRateLimit(`create_${socket.handshake.address}`, 10, 60000)) {
+      return callback({ success: false, error: 'Too many rooms created. Please wait 1 minute.' });
+    }
+
     try {
-      const room = memoryStore.createRoom(topic);
+      const sanitizedTopic = (topic || '').trim().slice(0, 80);
+      const room = memoryStore.createRoom(sanitizedTopic);
       callback({ success: true, room });
     } catch (err) {
       console.error('Error creating room:', err);
@@ -90,8 +146,13 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
   // 1b. Restore / Auto-Recreate Room (Professor Reconnect)
   socket.on('restore-room', ({ roomCode, topic, sessionId }, callback) => {
     try {
-      const code = roomCode.toUpperCase();
-      const room = memoryStore.restoreRoom(code, topic, sessionId);
+      const code = (roomCode || '').toUpperCase().trim();
+      if (!/^[A-Z0-9]{4,10}$/.test(code)) {
+        return callback({ success: false, error: 'Invalid room code' });
+      }
+
+      const sanitizedTopic = (topic || '').trim().slice(0, 80);
+      const room = memoryStore.restoreRoom(code, sanitizedTopic, sessionId);
       const joined = memoryStore.joinSocket(socket.id, code, sessionId, 'host');
       if (joined) {
         socket.join(code);
@@ -113,8 +174,13 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // 2. Join Room (Student or Host)
   socket.on('join-room', ({ roomCode, sessionId, role }, callback) => {
-    const code = roomCode.toUpperCase();
-    const joined = memoryStore.joinSocket(socket.id, code, sessionId, role);
+    const code = (roomCode || '').toUpperCase().trim();
+    if (!/^[A-Z0-9]{4,10}$/.test(code)) {
+      return callback({ success: false, error: 'Invalid room code format' });
+    }
+
+    const safeSessionId = (sessionId || '').trim().slice(0, 64);
+    const joined = memoryStore.joinSocket(socket.id, code, safeSessionId, role);
 
     if (!joined) {
       return callback({ success: false, error: 'Room not found or session ended' });
@@ -133,10 +199,22 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     });
   });
 
-  // 3. Submit Question (Student)
+  // 3. Submit Question (Student) - Rate limited to 15 per minute per session
   socket.on('submit-question', ({ roomCode, text, slideTag, sessionId }, callback) => {
-    const code = roomCode.toUpperCase();
-    const question = memoryStore.addQuestion(code, text, slideTag, sessionId);
+    const safeSessionId = (sessionId || socket.id).slice(0, 64);
+    if (!checkRateLimit(`ask_${safeSessionId}`, 15, 60000)) {
+      return callback({ success: false, error: 'Please wait a moment before posting another question.' });
+    }
+
+    const code = (roomCode || '').toUpperCase().trim();
+    const sanitizedText = (text || '').trim().slice(0, 280);
+    const sanitizedSlide = slideTag ? slideTag.trim().slice(0, 30) : undefined;
+
+    if (!sanitizedText) {
+      return callback({ success: false, error: 'Question text cannot be empty' });
+    }
+
+    const question = memoryStore.addQuestion(code, sanitizedText, sanitizedSlide, safeSessionId);
 
     if (!question) {
       return callback({ success: false, error: 'Failed to submit question or room is locked' });
@@ -147,10 +225,15 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     callback({ success: true, question });
   });
 
-  // 4. Upvote Question
+  // 4. Upvote Question - Rate limited to 40 toggles per minute per session
   socket.on('upvote-question', ({ roomCode, questionId, sessionId }, callback) => {
-    const code = roomCode.toUpperCase();
-    const result = memoryStore.upvoteQuestion(code, questionId, sessionId);
+    const safeSessionId = (sessionId || socket.id).slice(0, 64);
+    if (!checkRateLimit(`vote_${safeSessionId}`, 40, 60000)) {
+      return callback({ success: false, error: 'Upvoting too fast. Please slow down.' });
+    }
+
+    const code = (roomCode || '').toUpperCase().trim();
+    const result = memoryStore.upvoteQuestion(code, questionId, safeSessionId);
 
     if (!result) {
       return callback({ success: false, error: 'Question not found' });
@@ -163,7 +246,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // 5. Toggle Pin Question (Instructor)
   socket.on('toggle-pin-question', ({ roomCode, questionId }, callback) => {
-    const code = roomCode.toUpperCase();
+    const code = (roomCode || '').toUpperCase().trim();
     const pinned = memoryStore.togglePinQuestion(code, questionId);
 
     if (!pinned) {
@@ -176,14 +259,13 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // 6. Update Question Status (Instructor: Pending -> Answering -> Resolved)
   socket.on('update-question-status', ({ roomCode, questionId, status }, callback) => {
-    const code = roomCode.toUpperCase();
+    const code = (roomCode || '').toUpperCase().trim();
     const result = memoryStore.updateQuestionStatus(code, questionId, status);
 
     if (!result) {
       return callback({ success: false, error: 'Failed to update question status' });
     }
 
-    // If another question was demoted from answering to pending, broadcast that update too
     if (result.previousAnswering) {
       io.to(code).emit('question-updated', result.previousAnswering);
     }
@@ -194,7 +276,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // 7. Delete Question (Instructor or moderation)
   socket.on('delete-question', ({ roomCode, questionId }, callback) => {
-    const code = roomCode.toUpperCase();
+    const code = (roomCode || '').toUpperCase().trim();
     const deleted = memoryStore.deleteQuestion(code, questionId);
 
     if (!deleted) {
@@ -207,7 +289,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // 8. End Session (Instructor)
   socket.on('end-session', ({ roomCode }, callback) => {
-    const code = roomCode.toUpperCase();
+    const code = (roomCode || '').toUpperCase().trim();
     const exportData = memoryStore.endSession(code);
 
     if (!exportData) {
@@ -228,7 +310,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
   });
 });
 
-// Resolve client dist path reliably across local and production cloud paths
+// Resolve client dist path reliably
 const possibleClientPaths = [
   path.resolve(process.cwd(), 'dist/client'),
   path.resolve(__dirname, '../../client'),
@@ -236,7 +318,6 @@ const possibleClientPaths = [
 ];
 const clientDistPath = possibleClientPaths.find((p) => fs.existsSync(p)) || path.resolve(process.cwd(), 'dist/client');
 
-console.log(`[PulseQ] Serving static assets from: ${clientDistPath}`);
 app.use(express.static(clientDistPath));
 
 app.get('*', (_req, res) => {
@@ -244,11 +325,11 @@ app.get('*', (_req, res) => {
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(200).send('PulseQ Backend API is running. Client assets are building.');
+    res.status(200).send('PulseQ Backend API is running.');
   }
 });
 
-// Bind to 0.0.0.0 so Render and cloud hosts can route incoming public traffic
+// Bind to 0.0.0.0
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = '0.0.0.0';
 

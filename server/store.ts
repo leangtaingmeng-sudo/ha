@@ -375,13 +375,30 @@ export class MemoryStore {
     const exportData = this.getExportData(roomCode);
     if (!exportData) return '';
 
+    // Prevent CSV / Excel formula injection (CWE-1236)
+    const sanitizeCell = (val: string): string => {
+      let clean = val.replace(/"/g, '""');
+      if (/^[=+\-@\t\r]/.test(clean)) {
+        clean = "'" + clean;
+      }
+      return `"${clean}"`;
+    };
+
     const headers = ['ID', 'Question', 'Slide / Section', 'Upvotes', 'Pinned', 'Status', 'Created Time', 'Resolved Time'];
     const rows = exportData.questions.map((q) => {
       const createdStr = new Date(q.createdAt).toISOString();
       const resolvedStr = q.resolvedAt ? new Date(q.resolvedAt).toISOString() : '';
       const slideStr = q.slideTag || 'None';
-      const cleanText = `"${q.text.replace(/"/g, '""')}"`;
-      return [q.id, cleanText, `"${slideStr}"`, q.upvotes, q.isPinned ? 'Yes' : 'No', q.status, createdStr, resolvedStr].join(',');
+      return [
+        q.id,
+        sanitizeCell(q.text),
+        sanitizeCell(slideStr),
+        q.upvotes,
+        q.isPinned ? 'Yes' : 'No',
+        q.status,
+        createdStr,
+        resolvedStr,
+      ].join(',');
     });
 
     return [headers.join(','), ...rows].join('\n');
