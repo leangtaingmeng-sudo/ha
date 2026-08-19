@@ -6,13 +6,13 @@ WORKDIR /app
 # Copy dependency manifests
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install all dependencies without running premature postinstall
+RUN npm ci --ignore-scripts
 
-# Copy source code
+# Copy full source code
 COPY . .
 
-# Build client and server
+# Build both client and server
 RUN npm run build
 
 # Production image
@@ -23,10 +23,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Copy built assets and package manifests
+# Copy manifests and install only production runtime dependencies
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --only=production --ignore-scripts
 
+# Copy compiled production assets from builder stage
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
