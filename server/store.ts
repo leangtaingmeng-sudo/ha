@@ -106,6 +106,35 @@ export class MemoryStore {
     return room;
   }
 
+  restoreRoom(code: string, topic?: string, hostSessionId?: string): Room {
+    const upperCode = code.toUpperCase();
+    const existing = this.rooms.get(upperCode);
+    if (existing) {
+      if (hostSessionId && !existing.hostSessionId) {
+        existing.hostSessionId = hostSessionId;
+      }
+      return existing;
+    }
+
+    const room: Room = {
+      code: upperCode,
+      topic: topic?.trim() || 'Classroom Session',
+      createdAt: Date.now(),
+      status: 'active',
+      participantCount: 0,
+      hostSessionId,
+    };
+
+    this.rooms.set(upperCode, room);
+    if (!this.questions.has(upperCode)) {
+      this.questions.set(upperCode, []);
+    }
+    this.roomSockets.set(upperCode, new Set());
+
+    this.scheduleSave();
+    return room;
+  }
+
   getRoom(code: string): Room | undefined {
     return this.rooms.get(code.toUpperCase());
   }

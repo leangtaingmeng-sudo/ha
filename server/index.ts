@@ -87,6 +87,30 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     }
   });
 
+  // 1b. Restore / Auto-Recreate Room (Professor Reconnect)
+  socket.on('restore-room', ({ roomCode, topic, sessionId }, callback) => {
+    try {
+      const code = roomCode.toUpperCase();
+      const room = memoryStore.restoreRoom(code, topic, sessionId);
+      const joined = memoryStore.joinSocket(socket.id, code, sessionId, 'host');
+      if (joined) {
+        socket.join(code);
+        io.to(code).emit('participant-count', joined.room.participantCount);
+        callback({
+          success: true,
+          room: joined.room,
+          questions: joined.questions,
+          isHost: true,
+        });
+      } else {
+        callback({ success: true, room, questions: [], isHost: true });
+      }
+    } catch (err) {
+      console.error('Error restoring room:', err);
+      callback({ success: false, error: 'Failed to restore room' });
+    }
+  });
+
   // 2. Join Room (Student or Host)
   socket.on('join-room', ({ roomCode, sessionId, role }, callback) => {
     const code = roomCode.toUpperCase();

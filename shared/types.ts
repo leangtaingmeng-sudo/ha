@@ -47,6 +47,17 @@ export interface ClientToServerEvents {
     callback: (res: { success: boolean; room?: Room; error?: string }) => void
   ) => void;
 
+  'restore-room': (
+    payload: { roomCode: string; topic?: string; sessionId: string },
+    callback: (res: {
+      success: boolean;
+      room?: Room;
+      questions?: Question[];
+      isHost?: boolean;
+      error?: string;
+    }) => void
+  ) => void;
+
   'join-room': (
     payload: { roomCode: string; sessionId: string; role: 'host' | 'student' },
     callback: (res: {
