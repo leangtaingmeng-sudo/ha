@@ -83,7 +83,7 @@ export class MemoryStore {
     }
   }
 
-  createRoom(topic: string): Room {
+  createRoom(topic: string, hostSessionId?: string): Room {
     let code = generateRoomCode();
     while (this.rooms.has(code)) {
       code = generateRoomCode();
@@ -95,6 +95,7 @@ export class MemoryStore {
       createdAt: Date.now(),
       status: 'active',
       participantCount: 0,
+      hostSessionId,
     };
 
     this.rooms.set(code, room);
@@ -114,12 +115,21 @@ export class MemoryStore {
     roomCode: string,
     sessionId: string,
     role: 'host' | 'student'
-  ): { room: Room; questions: Question[] } | null {
+  ): { room: Room; questions: Question[]; isHost: boolean } | null {
     const code = roomCode.toUpperCase();
     const room = this.rooms.get(code);
     if (!room) return null;
 
-    this.socketData.set(socketId, { roomCode: code, sessionId, role });
+    // If joining as host, register this session as the host if not already set
+    if (role === 'host') {
+      room.hostSessionId = sessionId;
+      this.scheduleSave();
+    }
+
+    // Auto-detect if user is the room host
+    const isHost = role === 'host' || (!!room.hostSessionId && room.hostSessionId === sessionId);
+
+    this.socketData.set(socketId, { roomCode: code, sessionId, role: isHost ? 'host' : 'student' });
 
     let sockets = this.roomSockets.get(code);
     if (!sockets) {
@@ -132,7 +142,7 @@ export class MemoryStore {
     room.participantCount = sockets.size;
 
     const questions = this.getQuestions(code);
-    return { room, questions };
+    return { room, questions, isHost };
   }
 
   leaveSocket(socketId: string): { roomCode: string; participantCount: number } | null {

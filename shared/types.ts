@@ -22,6 +22,7 @@ export interface Room {
   endedAt?: number;
   status: 'active' | 'ended';
   participantCount: number;
+  hostSessionId?: string;
 }
 
 export interface SessionStats {

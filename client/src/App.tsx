@@ -23,10 +23,20 @@ export const App: React.FC = () => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
 
-  // Auto-reconnect to previous session on page refresh
+  // Auto-reconnect to previous session on page refresh (checking URL query + localStorage)
   useEffect(() => {
+    // 1. Check URL parameters (?room=XYZ&role=host)
+    const params = new URLSearchParams(window.location.search);
+    const urlRoom = params.get('room')?.trim().toUpperCase();
+    const urlRole = params.get('role')?.toLowerCase() === 'host' ? 'host' : 'student';
+
+    // 2. Check localStorage saved session
     const saved = getSavedActiveSession();
-    if (!saved) {
+
+    const targetRoom = urlRoom || saved?.roomCode;
+    const targetRole: 'host' | 'student' = (urlRoom ? urlRole : saved?.role) || 'student';
+
+    if (!targetRoom) {
       setIsRestoringSession(false);
       return;
     }
@@ -35,34 +45,43 @@ export const App: React.FC = () => {
       socket.emit(
         'join-room',
         {
-          roomCode: saved.roomCode,
+          roomCode: targetRoom,
           sessionId,
-          role: saved.role,
+          role: targetRole,
         },
         (res) => {
           setIsRestoringSession(false);
           if (res.success && res.room && res.questions) {
+            const hostFlag = res.isHost ?? (targetRole === 'host');
             setCurrentRoom(res.room);
             setQuestions(res.questions);
-            setIsHost(res.isHost ?? (saved.role === 'host'));
-            addRecentRoom(res.room.code, res.room.topic, res.isHost ? 'host' : 'student');
+            setIsHost(hostFlag);
+            saveActiveSession(res.room.code, hostFlag ? 'host' : 'student');
+            addRecentRoom(res.room.code, res.room.topic, hostFlag ? 'host' : 'student');
+            // Sync clean URL query
+            window.history.replaceState(
+              {},
+              '',
+              `?room=${res.room.code}${hostFlag ? '&role=host' : ''}`
+            );
           } else {
-            // Room expired or deleted
+            // Room not found or ended
             clearActiveSession();
+            window.history.replaceState({}, '', window.location.pathname);
           }
         }
       );
     };
 
-    if (socket.connected) {
-      tryReconnect();
-    } else {
-      socket.once('connect', tryReconnect);
-      const timeout = setTimeout(() => {
-        setIsRestoringSession(false);
-      }, 2500);
-      return () => clearTimeout(timeout);
-    }
+    // Socket.io auto-buffers emit if connecting
+    tryReconnect();
+
+    // Fallback safety timeout (4s)
+    const timeout = setTimeout(() => {
+      setIsRestoringSession(false);
+    }, 4000);
+
+    return () => clearTimeout(timeout);
   }, [sessionId]);
 
   useEffect(() => {
@@ -129,6 +148,11 @@ export const App: React.FC = () => {
     setEndedExportData(null);
     saveActiveSession(data.room.code, data.isHost ? 'host' : 'student');
     addRecentRoom(data.room.code, data.room.topic, data.isHost ? 'host' : 'student');
+    window.history.replaceState(
+      {},
+      '',
+      `?room=${data.room.code}${data.isHost ? '&role=host' : ''}`
+    );
   };
 
   const handleLeaveRoom = () => {
@@ -137,7 +161,7 @@ export const App: React.FC = () => {
     setQuestions([]);
     setIsHost(false);
     setEndedExportData(null);
-    window.history.pushState({}, '', window.location.pathname);
+    window.history.replaceState({}, '', window.location.pathname);
   };
 
   const handleStartNewSession = () => {
@@ -150,7 +174,7 @@ export const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-        <span className="text-sm font-medium">Connecting to PulseQ...</span>
+        <span className="text-sm font-medium">Reconnecting to your classroom HUD...</span>
       </div>
     );
   }

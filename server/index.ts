@@ -105,7 +105,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
       success: true,
       room: joined.room,
       questions: joined.questions,
-      isHost: role === 'host',
+      isHost: joined.isHost,
     });
   });
 
