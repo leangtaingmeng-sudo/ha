@@ -191,7 +191,7 @@ export const App: React.FC = () => {
     window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const handleStartNewSession = () => {
+  const handleReturnToMainScreen = () => {
     setIsExportModalOpen(false);
     handleLeaveRoom();
   };
@@ -222,14 +222,14 @@ export const App: React.FC = () => {
             setEndedExportData(exportData);
             setIsExportModalOpen(true);
           }}
-          onNewSession={handleStartNewSession}
+          onNewSession={handleReturnToMainScreen}
         />
         {endedExportData && (
           <ExportModal
             exportData={endedExportData}
             isOpen={isExportModalOpen}
-            onClose={() => setIsExportModalOpen(false)}
-            onNewSession={handleStartNewSession}
+            onClose={handleReturnToMainScreen}
+            onNewSession={handleReturnToMainScreen}
           />
         )}
       </>
@@ -249,8 +249,8 @@ export const App: React.FC = () => {
         <ExportModal
           exportData={endedExportData}
           isOpen={isExportModalOpen}
-          onClose={() => setIsExportModalOpen(false)}
-          onNewSession={handleStartNewSession}
+          onClose={handleReturnToMainScreen}
+          onNewSession={handleReturnToMainScreen}
         />
       )}
     </>

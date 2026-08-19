@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SessionExportData } from '../../../shared/types.js';
-import { X, Download, FileText, Check, Copy, Sparkles, CheckCircle2, MessageSquare, ThumbsUp } from 'lucide-react';
+import { X, Download, FileText, Check, Copy, Sparkles, CheckCircle2, MessageSquare, ThumbsUp, Home, ArrowLeft } from 'lucide-react';
 
 interface ExportModalProps {
   exportData: SessionExportData;
@@ -41,6 +41,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
+  const handleFinishAndReturn = () => {
+    if (onNewSession) {
+      onNewSession();
+    } else {
+      onClose();
+    }
+  };
+
   const resolvedPercent = stats.totalQuestions > 0
     ? Math.round((stats.resolvedCount / stats.totalQuestions) * 100)
     : 0;
@@ -48,11 +56,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8">
-        {/* Close Button */}
+        {/* Close Button — Returns to Main Screen */}
         <button
-          onClick={onClose}
+          onClick={handleFinishAndReturn}
           className="absolute top-5 right-5 p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded-full transition"
-          aria-label="Close export dialog"
+          aria-label="Close and return to main screen"
+          title="Return to main screen"
         >
           <X className="w-5 h-5" />
         </button>
@@ -104,7 +113,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </div>
               <div>
                 <div className="font-semibold text-slate-100 text-sm">Download Spreadsheet (CSV)</div>
-                <div className="text-xs text-slate-400">Contains full table of questions, slide tags, upvotes, & timestamps</div>
+                <div className="text-xs text-slate-400">Full log with questions, slide numbers, upvotes & timestamps</div>
               </div>
             </div>
             <Download className="w-5 h-5 text-slate-400 group-hover:text-blue-400 transition" />
@@ -144,19 +153,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </button>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
+        {/* Footer with Return to Main Screen Button */}
+        <div className="flex items-center justify-between pt-3 border-t border-slate-800/60">
           <span className="text-xs text-slate-400">
             {questions.length} total questions logged
           </span>
-          {onNewSession && (
-            <button
-              onClick={onNewSession}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition active:scale-95 shadow-md shadow-indigo-600/20"
-            >
-              Start New Class Session
-            </button>
-          )}
+
+          <button
+            onClick={handleFinishAndReturn}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition active:scale-95 shadow-md shadow-indigo-600/25"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Return to Main Screen</span>
+          </button>
         </div>
       </div>
     </div>
