@@ -19,7 +19,9 @@ import {
   Check,
   Pin,
   Flame,
-  WifiOff
+  WifiOff,
+  Inbox,
+  Archive
 } from 'lucide-react';
 
 interface StudentViewProps {
@@ -43,7 +45,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isComposerOpen, setIsComposerOpen] = useState(true);
-  const [filterTab, setFilterTab] = useState<'all' | 'unresolved' | 'resolved' | 'mine'>('all');
+  // Default to 'unresolved' so resolved questions are immediately moved out of active view
+  const [filterTab, setFilterTab] = useState<'unresolved' | 'resolved' | 'mine' | 'all'>('unresolved');
   const [sortBy, setSortBy] = useState<'upvotes' | 'recent'>('upvotes');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isConnected, setIsConnected] = useState(socket.connected);
@@ -76,7 +79,6 @@ export const StudentView: React.FC<StudentViewProps> = ({
         return;
       } catch {}
     }
-    // Fallback to clipboard
     navigator.clipboard.writeText(joinUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
@@ -136,7 +138,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
   // Find question currently being answered
   const answeringQuestion = questions.find((q) => q.status === 'answering');
 
-  // Filter questions
+  const unresolvedCount = questions.filter((q) => q.status !== 'resolved').length;
+  const resolvedCount = questions.filter((q) => q.status === 'resolved').length;
+  const mineCount = questions.filter((q) => q.sessionId === sessionId).length;
+
+  // Filter questions according to tab
   const filteredQuestions = questions.filter((q) => {
     if (filterTab === 'unresolved') return q.status !== 'resolved';
     if (filterTab === 'resolved') return q.status === 'resolved';
@@ -327,39 +333,33 @@ export const StudentView: React.FC<StudentViewProps> = ({
           )}
         </div>
 
-        {/* Filter & Sort Controls */}
-        <div className="flex items-center justify-between gap-2 pt-2 pb-1 text-xs">
+        {/* Filter Tabs — Clearly separates Open vs Resolved Questions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 pb-1 text-xs">
           <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl overflow-x-auto">
             <button
-              onClick={() => setFilterTab('all')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                filterTab === 'all'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              All ({questions.length})
-            </button>
-            <button
               onClick={() => setFilterTab('unresolved')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition ${
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
                 filterTab === 'unresolved'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Open ({questions.filter((q) => q.status !== 'resolved').length})
+              <Inbox className="w-3.5 h-3.5" />
+              <span>Open Doubts ({unresolvedCount})</span>
             </button>
+
             <button
               onClick={() => setFilterTab('resolved')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition ${
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
                 filterTab === 'resolved'
-                  ? 'bg-indigo-600 text-white shadow-sm'
+                  ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Resolved ({questions.filter((q) => q.status === 'resolved').length})
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Answered ({resolvedCount})</span>
             </button>
+
             <button
               onClick={() => setFilterTab('mine')}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
@@ -368,11 +368,22 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Mine ({questions.filter((q) => q.sessionId === sessionId).length})
+              Mine ({mineCount})
+            </button>
+
+            <button
+              onClick={() => setFilterTab('all')}
+              className={`px-2.5 py-1.5 rounded-lg font-medium transition ${
+                filterTab === 'all'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              All ({questions.length})
             </button>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 self-end sm:self-center">
             <button
               onClick={() => setSortBy(sortBy === 'upvotes' ? 'recent' : 'upvotes')}
               className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl transition flex items-center gap-1 text-xs"
@@ -387,11 +398,23 @@ export const StudentView: React.FC<StudentViewProps> = ({
           {sortedQuestions.length === 0 ? (
             <div className="text-center py-12 px-4 bg-slate-900/40 border border-dashed border-slate-800/80 rounded-2xl">
               <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-3">
-                <Sparkles className="w-6 h-6" />
+                {filterTab === 'resolved' ? (
+                  <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                ) : (
+                  <Sparkles className="w-6 h-6" />
+                )}
               </div>
-              <h3 className="text-base font-semibold text-slate-200 mb-1">No questions yet</h3>
+              <h3 className="text-base font-semibold text-slate-200 mb-1">
+                {filterTab === 'resolved'
+                  ? 'No answered doubts yet'
+                  : filterTab === 'mine'
+                  ? "You haven't posted any doubts"
+                  : 'No open questions'}
+              </h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Have a doubt about the current topic or slide? Ask anonymously above and let classmates upvote!
+                {filterTab === 'resolved'
+                  ? 'Questions marked as resolved by the teacher will appear here.'
+                  : 'Have a doubt about the current topic or slide? Ask anonymously above and let classmates upvote!'}
               </p>
             </div>
           ) : (
@@ -411,7 +434,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                       : question.isPinned
                       ? 'bg-indigo-950/30 border-indigo-500/50 shadow-md'
                       : isResolved
-                      ? 'bg-slate-900/40 border-slate-800/60 opacity-80'
+                      ? 'bg-slate-900/40 border-emerald-900/40 text-slate-300'
                       : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
                   }`}
                 >
@@ -452,7 +475,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                       </div>
 
                       {/* Question Text */}
-                      <p className={`text-sm leading-relaxed ${isResolved ? 'text-slate-300 line-through/20' : 'text-slate-100 font-medium'}`}>
+                      <p className={`text-sm leading-relaxed ${isResolved ? 'text-slate-300 font-medium' : 'text-slate-100 font-medium'}`}>
                         {question.text}
                       </p>
 
@@ -472,7 +495,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                           ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-95'
                           : 'bg-slate-950/80 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-indigo-400 active:scale-95'
                       } ${isResolved ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={hasUpvoted ? 'Remove upvote' : 'Upvote this doubt'}
+                      title={isResolved ? 'Resolved by instructor' : hasUpvoted ? 'Remove upvote' : 'Upvote this doubt'}
                       aria-label="Upvote question"
                     >
                       <ThumbsUp
