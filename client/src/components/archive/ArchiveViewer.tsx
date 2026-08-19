@@ -173,31 +173,22 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {onReopenRoom && (
-              <button
-                onClick={() => onReopenRoom(room.code)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-indigo-600/20 active:scale-95"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Reopen Live HUD</span>
-                <span className="sm:hidden">Reopen</span>
-              </button>
-            )}
-
             <button
               onClick={handleDownloadCSV}
-              className="p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition border border-slate-700"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition border border-slate-700 text-xs font-medium"
               title="Download CSV Spreadsheet"
             >
-              <Download className="w-4 h-4 text-blue-400" />
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span className="hidden sm:inline">CSV</span>
             </button>
 
             <button
               onClick={handleDownloadMD}
-              className="p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition border border-slate-700"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition border border-slate-700 text-xs font-medium"
               title="Download Markdown Summary"
             >
-              <FileText className="w-4 h-4 text-purple-400" />
+              <FileText className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">Markdown</span>
             </button>
           </div>
         </div>
