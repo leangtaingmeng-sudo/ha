@@ -171,26 +171,6 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({
               </h1>
             </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleDownloadCSV}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition border border-slate-700 text-xs font-medium"
-              title="Download CSV Spreadsheet"
-            >
-              <Download className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden sm:inline">CSV</span>
-            </button>
-
-            <button
-              onClick={handleDownloadMD}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition border border-slate-700 text-xs font-medium"
-              title="Download Markdown Summary"
-            >
-              <FileText className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden sm:inline">Markdown</span>
-            </button>
-          </div>
         </div>
       </header>
 
