@@ -16,7 +16,7 @@ export interface RecentRoom {
 export function getOrCreateSessionId(): string {
   let sessionId = localStorage.getItem(SESSION_KEY);
   if (!sessionId) {
-    sessionId = 'anon_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+    sessionId = 'anon_' + crypto.randomUUID().replace(/-/g, '');
     localStorage.setItem(SESSION_KEY, sessionId);
   }
   return sessionId;

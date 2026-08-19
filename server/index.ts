@@ -14,7 +14,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 
-// Defensive Rate Limiting (In-Memory sliding window)
+// ---------------------------------------------------------------------------
+// Rate Limiting (In-Memory sliding window)
+// ---------------------------------------------------------------------------
 interface RateLimitBucket {
   count: number;
   resetAt: number;
@@ -45,27 +47,55 @@ setInterval(() => {
   }
 }, 120000);
 
+// ---------------------------------------------------------------------------
+// [H2 FIX] Host-only authorization guard
+// ---------------------------------------------------------------------------
+function isHostSocket(socketId: string): boolean {
+  const data = memoryStore.getSocketData(socketId);
+  return data?.role === 'host';
+}
+
+// ---------------------------------------------------------------------------
+// [H1 FIX] Restrict CORS to production domain + localhost dev
+// ---------------------------------------------------------------------------
+const ALLOWED_ORIGINS: (string | RegExp)[] = [
+  'https://ha-l1qq.onrender.com',
+  /^http:\/\/localhost(:\d+)?$/,
+];
+
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
   cors: {
-    origin: '*',
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
   },
   transports: ['websocket', 'polling'],
 });
 
-// Security Headers Middleware
+// ---------------------------------------------------------------------------
+// Security Headers Middleware  [M1 + M2 FIX]
+// ---------------------------------------------------------------------------
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // [M2] HSTS — instruct browsers to always use HTTPS
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // [M1] Content Security Policy — restrict resource loading
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' wss://ha-l1qq.onrender.com ws://localhost:*"
+  );
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   next();
 });
 
-app.use(cors());
-app.use(express.json({ limit: '100kb' })); // Mitigate large body DoS payload attacks
+app.use(cors({ origin: ALLOWED_ORIGINS }));
+app.use(express.json({ limit: '100kb' })); // Mitigate large body DoS
 
+// ---------------------------------------------------------------------------
 // REST API Endpoints
+// ---------------------------------------------------------------------------
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
@@ -125,7 +155,9 @@ app.get('/api/rooms/:code/export/md', (req, res) => {
   return res.send(md);
 });
 
+// ---------------------------------------------------------------------------
 // Socket.IO Real-Time Handlers
+// ---------------------------------------------------------------------------
 io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
   // 1. Create Room (Instructor)
   socket.on('create-room', ({ topic }, callback) => {
@@ -244,8 +276,16 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     callback({ success: true, upvotes: result.question.upvotes });
   });
 
-  // 5. Toggle Pin Question (Instructor)
+  // -----------------------------------------------------------------------
+  // [H2 FIX] HOST-ONLY EVENTS — All guarded by isHostSocket()
+  // -----------------------------------------------------------------------
+
+  // 5. Toggle Pin Question (Instructor ONLY)
   socket.on('toggle-pin-question', ({ roomCode, questionId }, callback) => {
+    if (!isHostSocket(socket.id)) {
+      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    }
+
     const code = (roomCode || '').toUpperCase().trim();
     const pinned = memoryStore.togglePinQuestion(code, questionId);
 
@@ -257,8 +297,12 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     callback({ success: true, isPinned: pinned.isPinned });
   });
 
-  // 6. Update Question Status (Instructor: Pending -> Answering -> Resolved)
+  // 6. Update Question Status (Instructor ONLY: Pending -> Answering -> Resolved)
   socket.on('update-question-status', ({ roomCode, questionId, status }, callback) => {
+    if (!isHostSocket(socket.id)) {
+      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    }
+
     const code = (roomCode || '').toUpperCase().trim();
     const result = memoryStore.updateQuestionStatus(code, questionId, status);
 
@@ -274,8 +318,12 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     callback({ success: true });
   });
 
-  // 7. Delete Question (Instructor or moderation)
+  // 7. Delete Question (Instructor ONLY)
   socket.on('delete-question', ({ roomCode, questionId }, callback) => {
+    if (!isHostSocket(socket.id)) {
+      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    }
+
     const code = (roomCode || '').toUpperCase().trim();
     const deleted = memoryStore.deleteQuestion(code, questionId);
 
@@ -287,8 +335,12 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     callback({ success: true });
   });
 
-  // 8. End Session (Instructor)
+  // 8. End Session (Instructor ONLY)
   socket.on('end-session', ({ roomCode }, callback) => {
+    if (!isHostSocket(socket.id)) {
+      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    }
+
     const code = (roomCode || '').toUpperCase().trim();
     const exportData = memoryStore.endSession(code);
 
@@ -310,7 +362,9 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
   });
 });
 
-// Resolve client dist path reliably
+// ---------------------------------------------------------------------------
+// Static Client Serving
+// ---------------------------------------------------------------------------
 const possibleClientPaths = [
   path.resolve(process.cwd(), 'dist/client'),
   path.resolve(__dirname, '../../client'),

@@ -1,21 +1,24 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { Room, Question, QuestionStatus, SessionExportData, SessionStats } from '../shared/types.js';
 
 // Non-ambiguous characters (omitted 0, O, 1, I, L)
 const ROOM_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
+// [M3 FIX] Use crypto.randomBytes instead of Math.random for unpredictable room codes
 function generateRoomCode(): string {
+  const bytes = crypto.randomBytes(6);
   let code = '';
   for (let i = 0; i < 6; i++) {
-    const randomIndex = Math.floor(Math.random() * ROOM_CODE_CHARS.length);
-    code += ROOM_CODE_CHARS[randomIndex];
+    code += ROOM_CODE_CHARS[bytes[i] % ROOM_CODE_CHARS.length];
   }
   return code;
 }
 
+// [M3 FIX] Use crypto.randomBytes for unique question IDs
 function generateId(): string {
-  return Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+  return crypto.randomBytes(8).toString('hex');
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -49,23 +52,16 @@ export class MemoryStore {
             this.questions.set(code, qList as Question[]);
           }
         }
-        console.log(`[PulseQ] Loaded ${this.rooms.size} rooms from persistent disk store.`);
+        console.log(`[PulseQ] Loaded ${this.rooms.size} rooms from disk.`);
       }
     } catch (err) {
-      console.warn('[PulseQ] Could not load data from disk, starting fresh store:', err);
+      console.warn('[PulseQ] Could not load store from disk:', err);
     }
   }
 
   private scheduleSave() {
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-    }
-    this.saveTimeout = setTimeout(() => {
-      this.saveToDisk();
-    }, 500);
-    if (this.saveTimeout.unref) {
-      this.saveTimeout.unref();
-    }
+    if (this.saveTimeout) clearTimeout(this.saveTimeout);
+    this.saveTimeout = setTimeout(() => this.saveToDisk(), 2000);
   }
 
   private saveToDisk() {
@@ -137,6 +133,11 @@ export class MemoryStore {
 
   getRoom(code: string): Room | undefined {
     return this.rooms.get(code.toUpperCase());
+  }
+
+  // [H2 FIX] Expose socket metadata for authorization checks
+  getSocketData(socketId: string): { roomCode: string; sessionId: string; role: 'host' | 'student' } | undefined {
+    return this.socketData.get(socketId);
   }
 
   joinSocket(
