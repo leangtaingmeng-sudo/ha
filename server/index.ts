@@ -90,7 +90,7 @@ app.use((_req, res, next) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' wss://ha-l1qq.onrender.com ws://localhost:* wss://localhost:*"
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://ha-l1qq.onrender.com wss://ha-l1qq.onrender.com ws: wss:;"
   );
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   next();
