@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Room, Question, QuestionStatus, SessionExportData, SessionStats } from '../shared/types.js';
 
 // Non-ambiguous characters (omitted 0, O, 1, I, L)
@@ -16,6 +18,9 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
 }
 
+const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'pulse_store.json');
+
 export class MemoryStore {
   private rooms: Map<string, Room> = new Map();
   private questions: Map<string, Question[]> = new Map();
@@ -23,6 +28,60 @@ export class MemoryStore {
   private roomSockets: Map<string, Set<string>> = new Map();
   // socketId -> { roomCode, sessionId, role }
   private socketData: Map<string, { roomCode: string; sessionId: string; role: 'host' | 'student' }> = new Map();
+  private saveTimeout: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.loadFromDisk();
+  }
+
+  private loadFromDisk() {
+    try {
+      if (fs.existsSync(DATA_FILE)) {
+        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.rooms && Array.isArray(data.rooms)) {
+          for (const r of data.rooms) {
+            this.rooms.set(r.code, { ...r, participantCount: 0 });
+          }
+        }
+        if (data.questions && typeof data.questions === 'object') {
+          for (const [code, qList] of Object.entries(data.questions)) {
+            this.questions.set(code, qList as Question[]);
+          }
+        }
+        console.log(`[PulseQ] Loaded ${this.rooms.size} rooms from persistent disk store.`);
+      }
+    } catch (err) {
+      console.warn('[PulseQ] Could not load data from disk, starting fresh store:', err);
+    }
+  }
+
+  private scheduleSave() {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+    }
+    this.saveTimeout = setTimeout(() => {
+      this.saveToDisk();
+    }, 500);
+    if (this.saveTimeout.unref) {
+      this.saveTimeout.unref();
+    }
+  }
+
+  private saveToDisk() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      const serialized = {
+        rooms: Array.from(this.rooms.values()),
+        questions: Object.fromEntries(this.questions.entries()),
+      };
+      fs.writeFileSync(DATA_FILE, JSON.stringify(serialized, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('[PulseQ] Error persisting store to disk:', err);
+    }
+  }
 
   createRoom(topic: string): Room {
     let code = generateRoomCode();
@@ -42,6 +101,7 @@ export class MemoryStore {
     this.questions.set(code, []);
     this.roomSockets.set(code, new Set());
 
+    this.scheduleSave();
     return room;
   }
 
@@ -140,6 +200,7 @@ export class MemoryStore {
     list.push(question);
     this.questions.set(code, list);
 
+    this.scheduleSave();
     return question;
   }
 
@@ -170,6 +231,7 @@ export class MemoryStore {
       hasUpvoted = false;
     }
 
+    this.scheduleSave();
     return { question, hasUpvoted };
   }
 
@@ -182,6 +244,7 @@ export class MemoryStore {
     if (!question) return null;
 
     question.isPinned = !question.isPinned;
+    this.scheduleSave();
     return question;
   }
 
@@ -213,6 +276,7 @@ export class MemoryStore {
     }
 
     question.status = newStatus;
+    this.scheduleSave();
     return { updatedQuestion: question, previousAnswering };
   }
 
@@ -225,6 +289,7 @@ export class MemoryStore {
     if (index === -1) return false;
 
     list.splice(index, 1);
+    this.scheduleSave();
     return true;
   }
 
@@ -236,6 +301,7 @@ export class MemoryStore {
     room.status = 'ended';
     room.endedAt = Date.now();
 
+    this.scheduleSave();
     return this.getExportData(code);
   }
 

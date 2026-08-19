@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { socket } from '../utils/socket.js';
+import {
+  getUserNickname,
+  setUserNickname,
+  getRecentRooms,
+  addRecentRoom,
+  removeRecentRoom,
+  RecentRoom
+} from '../utils/session.js';
 import { Room, Question } from '../../shared/types.js';
 import {
   Sparkles,
@@ -10,7 +18,11 @@ import {
   Zap,
   Tag,
   Download,
-  AlertCircle
+  AlertCircle,
+  Clock,
+  Trash2,
+  User,
+  History
 } from 'lucide-react';
 
 interface LandingJoinProps {
@@ -22,6 +34,8 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
   const [activeTab, setActiveTab] = useState<'join' | 'host'>('join');
   const [roomCode, setRoomCode] = useState('');
   const [topic, setTopic] = useState('');
+  const [nickname, setNickname] = useState(() => getUserNickname());
+  const [recentRooms, setRecentRooms] = useState<RecentRoom[]>(() => getRecentRooms());
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -36,9 +50,13 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
     }
   }, []);
 
-  const handleJoin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanCode = roomCode.trim().toUpperCase();
+  const handleNicknameChange = (val: string) => {
+    setNickname(val);
+    setUserNickname(val);
+  };
+
+  const handleJoinCode = (codeToJoin: string, roleToAssume: 'host' | 'student' = 'student') => {
+    const cleanCode = codeToJoin.trim().toUpperCase();
     if (!cleanCode) {
       setErrorMessage('Please enter a 6-character room code.');
       return;
@@ -52,17 +70,23 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
       {
         roomCode: cleanCode,
         sessionId,
-        role: 'student',
+        role: roleToAssume,
       },
       (res) => {
         setIsLoading(false);
         if (res.success && res.room && res.questions) {
-          onJoined({ room: res.room, questions: res.questions, isHost: false });
+          addRecentRoom(res.room.code, res.room.topic, res.isHost ? 'host' : 'student');
+          onJoined({ room: res.room, questions: res.questions, isHost: res.isHost ?? (roleToAssume === 'host') });
         } else {
-          setErrorMessage(res.error || 'Room not found. Please verify the 6-character code.');
+          setErrorMessage(res.error || 'Room not found or has ended.');
         }
       }
     );
+  };
+
+  const handleJoin = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleJoinCode(roomCode, 'student');
   };
 
   const handleCreateHost = (e: React.FormEvent) => {
@@ -89,6 +113,7 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
           (joinRes) => {
             setIsLoading(false);
             if (joinRes.success && joinRes.room) {
+              addRecentRoom(joinRes.room.code, joinRes.room.topic, 'host');
               onJoined({
                 room: joinRes.room,
                 questions: joinRes.questions || [],
@@ -104,6 +129,12 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
         setErrorMessage(res.error || 'Failed to create room.');
       }
     });
+  };
+
+  const handleRemoveRecent = (e: React.MouseEvent, code: string) => {
+    e.stopPropagation();
+    removeRecentRoom(code);
+    setRecentRooms(getRecentRooms());
   };
 
   return (
@@ -125,16 +156,18 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-medium text-slate-300">Live Q&A Engine</span>
+        <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-full">
+          <User className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="font-mono text-slate-300">
+            {nickname ? nickname : `Anon #${sessionId.slice(-4).toUpperCase()}`}
+          </span>
         </div>
       </header>
 
       {/* Main Section */}
-      <main className="relative z-10 max-w-xl mx-auto w-full px-4 sm:px-6 py-8 flex-1 flex flex-col justify-center">
+      <main className="relative z-10 max-w-xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col justify-center">
         {/* Title */}
-        <div className="text-center space-y-2 mb-8">
+        <div className="text-center space-y-2 mb-6">
           <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-100 tracking-tight">
             Anonymous Classroom <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-sky-400 to-indigo-300">Q&A HUD</span>
           </h2>
@@ -198,6 +231,20 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Your Alias / Nickname <span className="text-slate-500">(Optional & Saved)</span>
+                </label>
+                <input
+                  type="text"
+                  value={nickname}
+                  onChange={(e) => handleNicknameChange(e.target.value)}
+                  placeholder="e.g. Alex (or leave blank to stay Anonymous)"
+                  maxLength={30}
+                  className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                />
+              </div>
+
               <button
                 type="submit"
                 disabled={isLoading || !roomCode.trim()}
@@ -256,8 +303,57 @@ export const LandingJoin: React.FC<LandingJoinProps> = ({ sessionId, onJoined })
           )}
         </div>
 
+        {/* Recent Classrooms History Card */}
+        {recentRooms.length > 0 && (
+          <div className="mt-6 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+              <History className="w-4 h-4 text-indigo-400" />
+              <span>Your Recent Classrooms</span>
+            </div>
+            <div className="space-y-2">
+              {recentRooms.map((room) => (
+                <div
+                  key={room.code}
+                  onClick={() => handleJoinCode(room.code, room.role)}
+                  className="p-3 bg-slate-950/80 hover:bg-slate-800/60 border border-slate-800 hover:border-indigo-500/40 rounded-xl transition cursor-pointer flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-600/20 text-indigo-300 font-mono font-bold text-xs border border-indigo-500/30">
+                      {room.code}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-200 truncate group-hover:text-indigo-300 transition">
+                        {room.topic}
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                        <span className="capitalize">{room.role === 'host' ? '👑 Host' : '🎓 Student'}</span>
+                        <span>&bull;</span>
+                        <span className="flex items-center gap-0.5">
+                          <Clock className="w-2.5 h-2.5 inline" />
+                          {new Date(room.lastVisited).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={(e) => handleRemoveRecent(e, room.code)}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                      title="Remove from history"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Feature Highlights Ribbon */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-8">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6">
           <div className="p-3 bg-slate-900/40 border border-slate-800/60 rounded-2xl text-center space-y-1">
             <Zap className="w-4 h-4 text-indigo-400 mx-auto" />
             <div className="text-xs font-semibold text-slate-200">Real-Time Queue</div>

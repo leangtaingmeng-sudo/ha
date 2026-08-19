@@ -4,7 +4,8 @@ import {
   getOrCreateSessionId,
   saveActiveSession,
   getSavedActiveSession,
-  clearActiveSession
+  clearActiveSession,
+  addRecentRoom
 } from './utils/session.js';
 import { Room, Question, SessionExportData } from '../shared/types.js';
 import { LandingJoin } from './components/LandingJoin.js';
@@ -44,8 +45,9 @@ export const App: React.FC = () => {
             setCurrentRoom(res.room);
             setQuestions(res.questions);
             setIsHost(res.isHost ?? (saved.role === 'host'));
+            addRecentRoom(res.room.code, res.room.topic, res.isHost ? 'host' : 'student');
           } else {
-            // Room expired or deleted on server restart
+            // Room expired or deleted
             clearActiveSession();
           }
         }
@@ -56,10 +58,9 @@ export const App: React.FC = () => {
       tryReconnect();
     } else {
       socket.once('connect', tryReconnect);
-      // Timeout fallback if socket takes too long
       const timeout = setTimeout(() => {
         setIsRestoringSession(false);
-      }, 3000);
+      }, 2500);
       return () => clearTimeout(timeout);
     }
   }, [sessionId]);
@@ -127,6 +128,7 @@ export const App: React.FC = () => {
     setIsHost(data.isHost);
     setEndedExportData(null);
     saveActiveSession(data.room.code, data.isHost ? 'host' : 'student');
+    addRecentRoom(data.room.code, data.room.topic, data.isHost ? 'host' : 'student');
   };
 
   const handleLeaveRoom = () => {
@@ -135,7 +137,6 @@ export const App: React.FC = () => {
     setQuestions([]);
     setIsHost(false);
     setEndedExportData(null);
-    // Clear URL query param without full page reload
     window.history.pushState({}, '', window.location.pathname);
   };
 
