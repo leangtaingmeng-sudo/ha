@@ -21,7 +21,8 @@ import {
   Flame,
   WifiOff,
   Inbox,
-  Archive
+  CheckCircle,
+  HelpCircle
 } from 'lucide-react';
 
 interface StudentViewProps {
@@ -45,8 +46,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isComposerOpen, setIsComposerOpen] = useState(true);
-  // Default to 'unresolved' so resolved questions are immediately moved out of active view
-  const [filterTab, setFilterTab] = useState<'unresolved' | 'resolved' | 'mine' | 'all'>('unresolved');
+  // Main view strictly shows 'open' active doubts, with 'resolved' as the separate answered list
+  const [activeTab, setActiveTab] = useState<'open' | 'resolved' | 'mine'>('open');
   const [sortBy, setSortBy] = useState<'upvotes' | 'recent'>('upvotes');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isConnected, setIsConnected] = useState(socket.connected);
@@ -114,6 +115,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
           setSlideTag('');
           setSuccessMessage('Your anonymous question was posted!');
           setTimeout(() => setSuccessMessage(null), 3000);
+          setActiveTab('open'); // Switch to open doubts
         } else {
           setErrorMessage(res.error || 'Failed to submit question.');
         }
@@ -138,20 +140,15 @@ export const StudentView: React.FC<StudentViewProps> = ({
   // Find question currently being answered
   const answeringQuestion = questions.find((q) => q.status === 'answering');
 
-  const unresolvedCount = questions.filter((q) => q.status !== 'resolved').length;
-  const resolvedCount = questions.filter((q) => q.status === 'resolved').length;
-  const mineCount = questions.filter((q) => q.sessionId === sessionId).length;
+  // Partition questions strictly into Unresolved (Main Queue) vs Resolved (Separate Answered Archive)
+  const openQuestions = questions.filter((q) => q.status !== 'resolved');
+  const resolvedQuestions = questions.filter((q) => q.status === 'resolved');
+  const myQuestions = questions.filter((q) => q.sessionId === sessionId);
 
-  // Filter questions according to tab
-  const filteredQuestions = questions.filter((q) => {
-    if (filterTab === 'unresolved') return q.status !== 'resolved';
-    if (filterTab === 'resolved') return q.status === 'resolved';
-    if (filterTab === 'mine') return q.sessionId === sessionId;
-    return true;
-  });
+  const displayList = activeTab === 'open' ? openQuestions : activeTab === 'resolved' ? resolvedQuestions : myQuestions;
 
   // Sort questions: Pinned first, then sortBy
-  const sortedQuestions = [...filteredQuestions].sort((a, b) => {
+  const sortedQuestions = [...displayList].sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
     if (!a.isPinned && b.isPinned) return 1;
     if (sortBy === 'upvotes') {
@@ -181,7 +178,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span>Room <strong className="font-mono text-indigo-400">{room.code}</strong></span>
                 <span>&bull;</span>
-                <span className="text-emerald-400 font-medium">Anonymous Student</span>
+                <span className="text-emerald-400 font-medium">Student HUD</span>
               </div>
             </div>
           </div>
@@ -333,88 +330,80 @@ export const StudentView: React.FC<StudentViewProps> = ({
           )}
         </div>
 
-        {/* Filter Tabs — Clearly separates Open vs Resolved Questions */}
+        {/* Dedicated View Switcher — Cleanly separates Active Queue from Already Answered Questions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 pb-1 text-xs">
-          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl overflow-x-auto">
+          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl overflow-x-auto">
+            {/* 1. Main Active Queue (Strictly open doubts) */}
             <button
-              onClick={() => setFilterTab('unresolved')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
-                filterTab === 'unresolved'
-                  ? 'bg-indigo-600 text-white shadow-sm'
+              onClick={() => setActiveTab('open')}
+              className={`px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 ${
+                activeTab === 'open'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Inbox className="w-3.5 h-3.5" />
-              <span>Open Doubts ({unresolvedCount})</span>
+              <HelpCircle className="w-4 h-4 text-indigo-300" />
+              <span>Active Doubts ({openQuestions.length})</span>
             </button>
 
+            {/* 2. Separate List of Already Answered Questions */}
             <button
-              onClick={() => setFilterTab('resolved')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
-                filterTab === 'resolved'
-                  ? 'bg-emerald-600 text-white shadow-sm'
+              onClick={() => setActiveTab('resolved')}
+              className={`px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 ${
+                activeTab === 'resolved'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
-              <span>Answered ({resolvedCount})</span>
+              <CheckCircle className="w-4 h-4 text-emerald-300" />
+              <span>Already Answered ({resolvedQuestions.length})</span>
             </button>
 
+            {/* 3. My Doubts */}
             <button
-              onClick={() => setFilterTab('mine')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                filterTab === 'mine'
-                  ? 'bg-indigo-600 text-white shadow-sm'
+              onClick={() => setActiveTab('mine')}
+              className={`px-3 py-2 rounded-xl font-medium transition ${
+                activeTab === 'mine'
+                  ? 'bg-slate-800 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Mine ({mineCount})
-            </button>
-
-            <button
-              onClick={() => setFilterTab('all')}
-              className={`px-2.5 py-1.5 rounded-lg font-medium transition ${
-                filterTab === 'all'
-                  ? 'bg-slate-700 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              All ({questions.length})
+              Mine ({myQuestions.length})
             </button>
           </div>
 
           <div className="flex items-center gap-1 self-end sm:self-center">
             <button
               onClick={() => setSortBy(sortBy === 'upvotes' ? 'recent' : 'upvotes')}
-              className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl transition flex items-center gap-1 text-xs"
+              className="px-3 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl transition flex items-center gap-1 text-xs"
             >
               {sortBy === 'upvotes' ? '🔥 Top Voted' : '⏱️ Most Recent'}
             </button>
           </div>
         </div>
 
-        {/* Live Question Feed */}
+        {/* Question Feed */}
         <div className="space-y-3">
           {sortedQuestions.length === 0 ? (
             <div className="text-center py-12 px-4 bg-slate-900/40 border border-dashed border-slate-800/80 rounded-2xl">
               <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-3">
-                {filterTab === 'resolved' ? (
+                {activeTab === 'resolved' ? (
                   <CheckCircle2 className="w-6 h-6 text-emerald-400" />
                 ) : (
                   <Sparkles className="w-6 h-6" />
                 )}
               </div>
               <h3 className="text-base font-semibold text-slate-200 mb-1">
-                {filterTab === 'resolved'
-                  ? 'No answered doubts yet'
-                  : filterTab === 'mine'
-                  ? "You haven't posted any doubts"
-                  : 'No open questions'}
+                {activeTab === 'resolved'
+                  ? 'No answered questions yet'
+                  : activeTab === 'mine'
+                  ? "You haven't asked any questions"
+                  : 'All questions answered! Queue is clear.'}
               </h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                {filterTab === 'resolved'
-                  ? 'Questions marked as resolved by the teacher will appear here.'
-                  : 'Have a doubt about the current topic or slide? Ask anonymously above and let classmates upvote!'}
+                {activeTab === 'resolved'
+                  ? 'Questions marked as resolved by the professor will be moved into this separate list.'
+                  : 'Have a doubt about the lecture? Ask anonymously above!'}
               </p>
             </div>
           ) : (
@@ -428,13 +417,13 @@ export const StudentView: React.FC<StudentViewProps> = ({
               return (
                 <div
                   key={question.id}
-                  className={`p-4 rounded-2xl border transition relative ${
+                  className={`p-4 rounded-2xl border transition-all duration-200 relative ${
                     isAnswering
                       ? 'bg-slate-900/95 border-sky-400/70 shadow-lg shadow-sky-950/50 glow-active'
                       : question.isPinned
                       ? 'bg-indigo-950/30 border-indigo-500/50 shadow-md'
                       : isResolved
-                      ? 'bg-slate-900/40 border-emerald-900/40 text-slate-300'
+                      ? 'bg-slate-900/50 border-emerald-500/30 text-slate-300'
                       : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
                   }`}
                 >
@@ -449,10 +438,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
                         )}
                         {isAnswering && (
                           <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-bold border border-sky-400/40 animate-pulse-subtle">
-                            <Radio className="w-3 h-3" /> Answering
+                            <Radio className="w-3 h-3" /> Speaking Now
                           </span>
                         )}
-                        {isHighDemand && (
+                        {isHighDemand && !isResolved && (
                           <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
                             <Flame className="w-3 h-3 text-amber-400" /> High Demand
                           </span>
@@ -483,6 +472,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
                       <div className="flex items-center gap-1 text-[11px] text-slate-400">
                         <Clock className="w-3 h-3" />
                         <span>{new Date(question.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        {question.resolvedAt && (
+                          <span className="text-emerald-400/80">
+                            &bull; Answered at {new Date(question.resolvedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -494,8 +488,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
                         hasUpvoted
                           ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/30 active:scale-95'
                           : 'bg-slate-950/80 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-indigo-400 active:scale-95'
-                      } ${isResolved ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={isResolved ? 'Resolved by instructor' : hasUpvoted ? 'Remove upvote' : 'Upvote this doubt'}
+                      } ${isResolved ? 'opacity-40 cursor-not-allowed' : ''}`}
+                      title={isResolved ? 'Answered by professor' : hasUpvoted ? 'Remove upvote' : 'Upvote this doubt'}
                       aria-label="Upvote question"
                     >
                       <ThumbsUp
