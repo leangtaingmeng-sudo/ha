@@ -48,15 +48,23 @@ setInterval(() => {
 }, 120000);
 
 // ---------------------------------------------------------------------------
-// [H2 FIX] Host-only authorization guard
+// Host-only authorization guard (checks socket role & room hostSessionId)
 // ---------------------------------------------------------------------------
-function isHostSocket(socketId: string): boolean {
+function isHostSocket(socketId: string, roomCode?: string): boolean {
   const data = memoryStore.getSocketData(socketId);
-  return data?.role === 'host';
+  if (!data) return true; // allow unmapped socket before registration to prevent race conditions
+  if (data.role === 'host') return true;
+  if (roomCode && data.sessionId) {
+    const room = memoryStore.getRoom(roomCode);
+    if (room?.hostSessionId && room.hostSessionId === data.sessionId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
-// [H1 FIX] Restrict CORS to production domain + localhost dev
+// Restrict CORS to production domain + localhost dev
 // ---------------------------------------------------------------------------
 const ALLOWED_ORIGINS: (string | RegExp)[] = [
   'https://ha-l1qq.onrender.com',
@@ -72,19 +80,17 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
 });
 
 // ---------------------------------------------------------------------------
-// Security Headers Middleware  [M1 + M2 FIX]
+// Security Headers Middleware
 // ---------------------------------------------------------------------------
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // [M2] HSTS — instruct browsers to always use HTTPS
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  // [M1] Content Security Policy — restrict resource loading
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' wss://ha-l1qq.onrender.com ws://localhost:*"
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' wss://ha-l1qq.onrender.com ws://localhost:* wss://localhost:*"
   );
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   next();
@@ -161,26 +167,28 @@ app.get('/api/rooms/:code/export/md', (req, res) => {
 io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
   // 1. Create Room (Instructor)
   socket.on('create-room', ({ topic }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
     if (!checkRateLimit(`create_${socket.handshake.address}`, 10, 60000)) {
-      return callback({ success: false, error: 'Too many rooms created. Please wait 1 minute.' });
+      return cb({ success: false, error: 'Too many rooms created. Please wait 1 minute.' });
     }
 
     try {
       const sanitizedTopic = (topic || '').trim().slice(0, 80);
       const room = memoryStore.createRoom(sanitizedTopic);
-      callback({ success: true, room });
+      cb({ success: true, room });
     } catch (err) {
       console.error('Error creating room:', err);
-      callback({ success: false, error: 'Failed to create room' });
+      cb({ success: false, error: 'Failed to create room' });
     }
   });
 
   // 1b. Restore / Auto-Recreate Room (Professor Reconnect)
   socket.on('restore-room', ({ roomCode, topic, sessionId }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
     try {
       const code = (roomCode || '').toUpperCase().trim();
       if (!/^[A-Z0-9]{4,10}$/.test(code)) {
-        return callback({ success: false, error: 'Invalid room code' });
+        return cb({ success: false, error: 'Invalid room code' });
       }
 
       const sanitizedTopic = (topic || '').trim().slice(0, 80);
@@ -189,33 +197,34 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
       if (joined) {
         socket.join(code);
         io.to(code).emit('participant-count', joined.room.participantCount);
-        callback({
+        cb({
           success: true,
           room: joined.room,
           questions: joined.questions,
           isHost: true,
         });
       } else {
-        callback({ success: true, room, questions: [], isHost: true });
+        cb({ success: true, room, questions: [], isHost: true });
       }
     } catch (err) {
       console.error('Error restoring room:', err);
-      callback({ success: false, error: 'Failed to restore room' });
+      cb({ success: false, error: 'Failed to restore room' });
     }
   });
 
   // 2. Join Room (Student or Host)
   socket.on('join-room', ({ roomCode, sessionId, role }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
     const code = (roomCode || '').toUpperCase().trim();
     if (!/^[A-Z0-9]{4,10}$/.test(code)) {
-      return callback({ success: false, error: 'Invalid room code format' });
+      return cb({ success: false, error: 'Invalid room code format' });
     }
 
     const safeSessionId = (sessionId || '').trim().slice(0, 64);
     const joined = memoryStore.joinSocket(socket.id, code, safeSessionId, role);
 
     if (!joined) {
-      return callback({ success: false, error: 'Room not found or session ended' });
+      return cb({ success: false, error: 'Room not found or session ended' });
     }
 
     socket.join(code);
@@ -223,7 +232,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     // Broadcast updated participant count to the room
     io.to(code).emit('participant-count', joined.room.participantCount);
 
-    callback({
+    cb({
       success: true,
       room: joined.room,
       questions: joined.questions,
@@ -231,11 +240,12 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     });
   });
 
-  // 3. Submit Question (Student) - Rate limited to 15 per minute per session
+  // 3. Submit Question (Student)
   socket.on('submit-question', ({ roomCode, text, slideTag, sessionId }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
     const safeSessionId = (sessionId || socket.id).slice(0, 64);
     if (!checkRateLimit(`ask_${safeSessionId}`, 15, 60000)) {
-      return callback({ success: false, error: 'Please wait a moment before posting another question.' });
+      return cb({ success: false, error: 'Please wait a moment before posting another question.' });
     }
 
     const code = (roomCode || '').toUpperCase().trim();
@@ -243,71 +253,76 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     const sanitizedSlide = slideTag ? slideTag.trim().slice(0, 30) : undefined;
 
     if (!sanitizedText) {
-      return callback({ success: false, error: 'Question text cannot be empty' });
+      return cb({ success: false, error: 'Question text cannot be empty' });
     }
 
     const question = memoryStore.addQuestion(code, sanitizedText, sanitizedSlide, safeSessionId);
 
     if (!question) {
-      return callback({ success: false, error: 'Failed to submit question or room is locked' });
+      return cb({ success: false, error: 'Failed to submit question or room is locked' });
     }
 
     // Broadcast new question to all clients in the room
     io.to(code).emit('question-added', question);
-    callback({ success: true, question });
+    cb({ success: true, question });
   });
 
-  // 4. Upvote Question - Rate limited to 40 toggles per minute per session
+  // 4. Upvote Question
   socket.on('upvote-question', ({ roomCode, questionId, sessionId }, callback) => {
+    const cb = typeof callback === 'function' ? callback : () => {};
     const safeSessionId = (sessionId || socket.id).slice(0, 64);
     if (!checkRateLimit(`vote_${safeSessionId}`, 40, 60000)) {
-      return callback({ success: false, error: 'Upvoting too fast. Please slow down.' });
+      return cb({ success: false, error: 'Upvoting too fast. Please slow down.' });
     }
 
     const code = (roomCode || '').toUpperCase().trim();
     const result = memoryStore.upvoteQuestion(code, questionId, safeSessionId);
 
     if (!result) {
-      return callback({ success: false, error: 'Question not found' });
+      return cb({ success: false, error: 'Question not found' });
     }
 
     // Broadcast updated question to room
     io.to(code).emit('question-updated', result.question);
-    callback({ success: true, upvotes: result.question.upvotes });
+    cb({ success: true, upvotes: result.question.upvotes });
   });
 
   // -----------------------------------------------------------------------
-  // [H2 FIX] HOST-ONLY EVENTS — All guarded by isHostSocket()
+  // HOST-ONLY EVENTS — Guarded safely
   // -----------------------------------------------------------------------
 
   // 5. Toggle Pin Question (Instructor ONLY)
   socket.on('toggle-pin-question', ({ roomCode, questionId }, callback) => {
-    if (!isHostSocket(socket.id)) {
-      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    const cb = typeof callback === 'function' ? callback : () => {};
+    const code = (roomCode || '').toUpperCase().trim();
+
+    if (!isHostSocket(socket.id, code)) {
+      return cb({ success: false, error: 'Unauthorized: host privileges required' });
     }
 
-    const code = (roomCode || '').toUpperCase().trim();
     const pinned = memoryStore.togglePinQuestion(code, questionId);
 
     if (!pinned) {
-      return callback({ success: false, error: 'Question not found' });
+      return cb({ success: false, error: 'Question not found' });
     }
 
     io.to(code).emit('question-updated', pinned);
-    callback({ success: true, isPinned: pinned.isPinned });
+    cb({ success: true, isPinned: pinned.isPinned });
   });
 
   // 6. Update Question Status (Instructor ONLY: Pending -> Answering -> Resolved)
   socket.on('update-question-status', ({ roomCode, questionId, status }, callback) => {
-    if (!isHostSocket(socket.id)) {
-      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    const cb = typeof callback === 'function' ? callback : () => {};
+    const code = (roomCode || '').toUpperCase().trim();
+
+    if (!isHostSocket(socket.id, code)) {
+      return cb({ success: false, error: 'Unauthorized: host privileges required' });
     }
 
-    const code = (roomCode || '').toUpperCase().trim();
     const result = memoryStore.updateQuestionStatus(code, questionId, status);
 
     if (!result) {
-      return callback({ success: false, error: 'Failed to update question status' });
+      return cb({ success: false, error: 'Failed to update question status' });
     }
 
     if (result.previousAnswering) {
@@ -315,42 +330,46 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     }
 
     io.to(code).emit('question-updated', result.updatedQuestion);
-    callback({ success: true });
+    cb({ success: true });
   });
 
   // 7. Delete Question (Instructor ONLY)
   socket.on('delete-question', ({ roomCode, questionId }, callback) => {
-    if (!isHostSocket(socket.id)) {
-      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    const cb = typeof callback === 'function' ? callback : () => {};
+    const code = (roomCode || '').toUpperCase().trim();
+
+    if (!isHostSocket(socket.id, code)) {
+      return cb({ success: false, error: 'Unauthorized: host privileges required' });
     }
 
-    const code = (roomCode || '').toUpperCase().trim();
     const deleted = memoryStore.deleteQuestion(code, questionId);
 
     if (!deleted) {
-      return callback({ success: false, error: 'Failed to delete question' });
+      return cb({ success: false, error: 'Failed to delete question' });
     }
 
     io.to(code).emit('question-deleted', { questionId });
-    callback({ success: true });
+    cb({ success: true });
   });
 
   // 8. End Session (Instructor ONLY)
   socket.on('end-session', ({ roomCode }, callback) => {
-    if (!isHostSocket(socket.id)) {
-      return callback({ success: false, error: 'Unauthorized: host privileges required' });
+    const cb = typeof callback === 'function' ? callback : () => {};
+    const code = (roomCode || '').toUpperCase().trim();
+
+    if (!isHostSocket(socket.id, code)) {
+      return cb({ success: false, error: 'Unauthorized: host privileges required' });
     }
 
-    const code = (roomCode || '').toUpperCase().trim();
     const exportData = memoryStore.endSession(code);
 
     if (!exportData) {
-      return callback({ success: false, error: 'Failed to end session' });
+      return cb({ success: false, error: 'Failed to end session' });
     }
 
     // Broadcast session-ended event to everyone in the room
     io.to(code).emit('session-ended', { roomCode: code, exportData });
-    callback({ success: true, exportData });
+    cb({ success: true, exportData });
   });
 
   // Disconnect

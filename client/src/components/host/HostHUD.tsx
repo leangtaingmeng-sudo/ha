@@ -80,6 +80,10 @@ export const HostHUD: React.FC<HostHUDProps> = ({
       roomCode: room.code,
       questionId,
       status,
+    }, (res) => {
+      if (res && !res.success) {
+        console.error('Failed to update question status:', res.error);
+      }
     });
   };
 
@@ -87,6 +91,10 @@ export const HostHUD: React.FC<HostHUDProps> = ({
     socket.emit('toggle-pin-question', {
       roomCode: room.code,
       questionId,
+    }, (res) => {
+      if (res && !res.success) {
+        console.error('Failed to toggle pin:', res.error);
+      }
     });
   };
 
@@ -95,6 +103,10 @@ export const HostHUD: React.FC<HostHUDProps> = ({
       socket.emit('delete-question', {
         roomCode: room.code,
         questionId,
+      }, (res) => {
+        if (res && !res.success) {
+          console.error('Failed to delete question:', res.error);
+        }
       });
     }
   };
